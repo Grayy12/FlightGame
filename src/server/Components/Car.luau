@@ -1,19 +1,23 @@
 local Explosion = require(game:GetService("ServerScriptService").Server.ServerExplosionHandler)
 
 local Car = {
-	Tag = "Car"
+	Tag = "Car",
 }
 
-Car.__index = Car 
+Car.__index = Car
 
 local THROW_STRENGTH = 450
 
 function Car.new(instance: Model)
-	local self = setmetatable({
+	local self = {
 		prompt = Instance.new("ProximityPrompt"),
 		instance = instance,
-		thrown = false
-	}, Car)
+		instancebackup = instance:Clone(),
+		state = "Idle",
+		connection = nil,
+		oldtransparencys = {},
+	}
+	setmetatable(self, Car)
 
 	self:Init()
 
@@ -31,10 +35,13 @@ function Car:Init()
 	self.prompt.HoldDuration = 0.25
 	self.prompt.RequiresLineOfSight = false
 
-	self.prompt.Triggered:Connect(function(player)
+	self.connection = self.prompt.Triggered:Connect(function(player)
 		local character = player.Character
-		if player:GetAttribute("Holding_Vehicle") == true or not character then return end
+		if player:GetAttribute("Holding_Vehicle") == true or not character then
+			return
+		end
 		player:SetAttribute("Holding_Vehicle", true)
+		self.state = "PickedUp"
 
 		local carValue = Instance.new("ObjectValue", player)
 		carValue.Name = "Held_Vehicle"
@@ -43,10 +50,16 @@ function Car:Init()
 
 		local hrp: BasePart = character.PrimaryPart
 
-		for _, part in self.instance:GetDescendants() do
+		for _, part: BasePart in self.instance:GetDescendants() do
 			if part:IsA("BasePart") then
 				part.Massless = true
 				part.Anchored = false
+				part:SetNetworkOwner(player)
+				self.oldtransparencys[part] = part.Transparency
+
+				if part.Transparency <= 0.7 then
+					part.Transparency = 0.7
+				end
 			end
 		end
 
@@ -58,7 +71,6 @@ function Car:Init()
 		self.weld = weld
 
 		self.player = player
-		mainPart:SetNetworkOwner(player)
 
 		self.prompt.Enabled = false
 	end)
@@ -69,21 +81,23 @@ function Car:Throw(direction: Vector3)
 	local weld: WeldConstraint = self.weld
 	local mainPart: BasePart = self.instance.PrimaryPart
 
-	if not player or not weld or self.thrown then return end
-	self.thrown = true
+	if not player or not weld or self.state ~= "PickedUp" then
+		return
+	end
+
+	self.state = "Thrown"
 
 	for _, part: BasePart in self.instance:GetDescendants() do
 		if part:IsA("BasePart") then
 			part.Massless = false
 			part.CollisionGroup = tostring(player.UserId)
+			part:SetNetworkOwner()
+			part.Transparency = self.oldtransparencys[part]
 		end
 	end
 
 	weld:Destroy()
-	weld = nil
 	self.weld = nil
-
-	mainPart:SetNetworkOwner()
 
 	mainPart:ApplyImpulse(direction * THROW_STRENGTH * mainPart.AssemblyMass)
 
@@ -96,11 +110,11 @@ function Car:Throw(direction: Vector3)
 	local rayParams = RaycastParams.new()
 	rayParams.IgnoreWater = true
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
-	rayParams.FilterDescendantsInstances = {self.instance}
+	rayParams.FilterDescendantsInstances = { self.instance }
 
 	local overlapParams = OverlapParams.new()
 	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-	overlapParams.FilterDescendantsInstances = {self.instance}
+	overlapParams.FilterDescendantsInstances = { self.instance }
 
 	while (not hit and tick() - starttick <= 10) and task.wait() do
 		local ray = workspace:Raycast(mainPart.Position, mainPart.AssemblyLinearVelocity.Unit * 10, rayParams)
@@ -111,7 +125,9 @@ function Car:Throw(direction: Vector3)
 			Explosion.Explode(nil, parts, ray.Position)
 
 			for _, weldConstrant: WeldConstraint in self.instance:GetDescendants() do
-				if not weldConstrant:IsA("WeldConstraint") and not weldConstrant:IsA("Weld") then continue end
+				if not weldConstrant:IsA("WeldConstraint") and not weldConstrant:IsA("Weld") then
+					continue
+				end
 
 				weldConstrant:Destroy()
 			end
@@ -119,13 +135,19 @@ function Car:Throw(direction: Vector3)
 	end
 
 	task.delay(1, function()
-		self:Destroy()
+		self:Respawn()
 	end)
 end
 
-function Car:Destroy()	
+function Car:Respawn()
+	local newInstance = self.instancebackup:Clone()
+	newInstance.Parent = workspace
+
+	self:Destroy()
+end
+
+function Car:Destroy()
 	if self.player and self.carValue and self.carValue.Value == self.instance then
-		warn("Setting Nil", self.carValue.Value:GetFullName())
 		self.player:SetAttribute("Holding_Vehicle", nil)
 	end
 
@@ -142,6 +164,11 @@ function Car:Destroy()
 	if self.carValue then
 		self.carValue:Destroy()
 		self.carValue = nil
+	end
+
+	if self.connection and self.connection.Connected then
+		self.connection:Disconnect()
+		self.connection = nil
 	end
 
 	self = nil
