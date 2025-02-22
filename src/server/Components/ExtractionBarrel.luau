@@ -53,7 +53,7 @@ function ExtractionBarrel.new(instance: Model)
 	return self
 end
 
-local function promptTriggered(self, player)
+function ExtractionBarrel:_promptTriggered(player): ()
   self:NextState()
 end
 
@@ -66,11 +66,11 @@ function ExtractionBarrel:Init()
 	self.prompt.RequiresLineOfSight = false
 
 	self:_newConnection(self.prompt.Triggered:Connect(function(player)
-    promptTriggered(self, player)
+    self:_promptTriggered(player)
   end))
 end
 
-local function updateProximityPrompt(self)
+function ExtractionBarrel:_updateProximityPrompt()
   local newprompt = self.prompt:Clone()
   newprompt.Parent = self.barrel
   self.prompt:Destroy()
@@ -79,7 +79,7 @@ local function updateProximityPrompt(self)
   self:_clearConnections()
 
   self:_newConnection(self.prompt.Triggered:Connect(function(player)
-    promptTriggered(self, player)
+    self:_promptTriggered(player)
   end))
 end
 
@@ -106,7 +106,7 @@ function ExtractionBarrel:NextState()
 
   end
 
-  updateProximityPrompt(self)
+  self:_updateProximityPrompt()
 end
 
 function ExtractionBarrel:Destroy()
